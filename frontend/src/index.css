@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #edf2ff 0%, #f8fafc 18%, #ffffff 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+input, select, textarea, button {
+  font: inherit;
+}
+
+.card-glow {
+  box-shadow: 0 20px 45px rgba(11, 31, 58, 0.12);
+}
+
+.grid-pattern {
+  background-image: radial-gradient(circle at 1px 1px, rgba(17, 41, 77, 0.08) 1px, transparent 0);
+  background-size: 18px 18px;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.section-title {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #0b1f3a;
+}
+
+.secondary-button {
+  @apply inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-100;
+}
+
+.primary-button {
+  @apply inline-flex items-center justify-center rounded-full bg-navy px-6 py-3 font-semibold text-white shadow-soft transition hover:bg-midnight;
+}
+
+.input-field {
+  @apply mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-slate-800 shadow-sm outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/20;
+}
+
+.label-text {
+  @apply mb-2 block text-sm font-medium text-slate-700;
+}
+
+.soft-panel {
+  @apply rounded-3xl border border-slate-200 bg-white/80 backdrop-blur-xl shadow-soft;
+}
