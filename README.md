@@ -93,7 +93,7 @@ GOOGLE_API_KEY=your-gemini-api-key
 6. Start the FastAPI server:
 
 ```bash
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8002 --reload
 ```
 
 ## Frontend Setup
