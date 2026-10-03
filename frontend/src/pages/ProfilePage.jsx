@@ -128,6 +128,9 @@ export default function ProfilePage() {
               {logoUrl && !selectedFile && <button type="button" onClick={removeLogo} className="secondary-button text-red-700" disabled={savingLogo}><Trash2 className="mr-2 h-4 w-4" />Remove logo</button>}
             </div>
           </div>
+          {!loadingLogo && <p className={`mt-3 text-sm font-semibold ${selectedFile ? 'text-amber-700' : logoUrl ? 'text-emerald-700' : 'text-slate-600'}`}>
+            {selectedFile ? 'Preview only — select Save logo to use this image in PDFs.' : logoUrl ? 'Custom logo saved — newly downloaded PDFs will include it.' : 'Using the built-in LegalEase logo in PDFs.'}
+          </p>}
           {selectedFile && <p className="mt-3 text-sm text-slate-600">Previewing {selectedFile.name}. Save to use it in PDFs.</p>}
           {loadingLogo && <p className="mt-3 text-sm text-slate-500">Loading saved logo...</p>}
           {logoMessage && <p role="status" className="mt-3 text-sm text-emerald-700">{logoMessage}</p>}
