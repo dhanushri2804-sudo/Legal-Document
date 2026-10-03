@@ -7,6 +7,7 @@ import api from '../api';
 export default function ProfilePage() {
   const { user } = useAuth();
   const [logoUrl, setLogoUrl] = useState('');
+  const [hasCustomLogo, setHasCustomLogo] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [loadingLogo, setLoadingLogo] = useState(true);
@@ -19,11 +20,8 @@ export default function ProfilePage() {
       const response = await api.get('/profile/logo', { responseType: 'blob' });
       const nextUrl = URL.createObjectURL(response.data);
       setLogoUrl(nextUrl);
+      setHasCustomLogo(response.headers['x-logo-source'] === 'custom');
     } catch (error) {
-      if (error.response?.status === 404) {
-        setLogoUrl('');
-        return;
-      }
       setLogoError('Unable to load the saved logo.');
     } finally {
       setLoadingLogo(false);
@@ -125,11 +123,11 @@ export default function ProfilePage() {
                 <input type="file" className="sr-only" accept="image/png,image/jpeg,image/webp" onChange={(event) => { setSelectedFile(event.target.files?.[0] || null); setLogoError(''); setLogoMessage(''); }} />
               </label>
               {selectedFile && <button type="button" onClick={saveLogo} className="primary-button" disabled={savingLogo}><ImagePlus className="mr-2 h-4 w-4" />{savingLogo ? 'Saving...' : 'Save logo'}</button>}
-              {logoUrl && !selectedFile && <button type="button" onClick={removeLogo} className="secondary-button text-red-700" disabled={savingLogo}><Trash2 className="mr-2 h-4 w-4" />Remove logo</button>}
+                      {hasCustomLogo && !selectedFile && <button type="button" onClick={removeLogo} className="secondary-button text-red-700" disabled={savingLogo}><Trash2 className="mr-2 h-4 w-4" />Remove logo</button>}
             </div>
           </div>
           {!loadingLogo && <p className={`mt-3 text-sm font-semibold ${selectedFile ? 'text-amber-700' : logoUrl ? 'text-emerald-700' : 'text-slate-600'}`}>
-            {selectedFile ? 'Preview only — select Save logo to use this image in PDFs.' : logoUrl ? 'Custom logo saved — newly downloaded PDFs will include it.' : 'Using the built-in LegalEase logo in PDFs.'}
+            {selectedFile ? 'Preview only — select Save logo to use this image in PDFs.' : hasCustomLogo ? 'Custom logo saved — newly downloaded PDFs will include it.' : 'Using the built-in LegalEase logo in PDFs.'}
           </p>}
           {selectedFile && <p className="mt-3 text-sm text-slate-600">Previewing {selectedFile.name}. Save to use it in PDFs.</p>}
           {loadingLogo && <p className="mt-3 text-sm text-slate-500">Loading saved logo...</p>}

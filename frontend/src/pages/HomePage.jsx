@@ -1,8 +1,9 @@
 import { ArrowRight, BadgeCheck, BookOpen, BriefcaseBusiness, CalendarClock, FileCheck2, FileSearch, FileSignature, FileText, GanttChart, History, MessageCircle, ShieldCheck, Sparkles } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const featureCards = [
+export const featureCards = [
   { icon: Sparkles, title: 'AI-Powered Document Generation', description: 'Turn your inputs into polished legal drafts with guided prompts and professional structure.' },
   { icon: FileText, title: 'Editable Document Preview', description: 'Review, revise, and refine every clause in a clean, distraction-free editor.' },
   { icon: FileCheck2, title: 'PDF, DOCX, and TXT Downloads', description: 'Export ready-to-share files in the formats your workflow needs most.' },
@@ -34,6 +35,13 @@ const documentTypes = [
 
 export default function HomePage() {
   const { isAuthenticated } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!location.hash) return;
+    const section = document.getElementById(location.hash.slice(1));
+    section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [location.hash]);
 
   return (
     <div>

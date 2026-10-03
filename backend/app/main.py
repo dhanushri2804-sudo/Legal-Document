@@ -595,12 +595,22 @@ def me(current_user: User = Depends(get_current_user)):
 @app.get("/api/profile/logo")
 def get_profile_logo(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
-    if not logo:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No organization logo has been uploaded.")
+    if logo:
+        image_data = logo.image_data
+        mime_type = logo.mime_type
+        logo_source = "custom"
+    else:
+        image_data = get_or_create_default_logo(db)
+        mime_type = "image/png"
+        logo_source = "default"
     return Response(
-        logo.image_data,
-        media_type=logo.mime_type,
-        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        image_data,
+        media_type=mime_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Logo-Source": logo_source,
+        },
     )
 
 
