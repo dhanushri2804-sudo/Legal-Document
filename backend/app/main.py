@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from docx import Document as DocxDocument
+from docx.shared import Inches
 from fpdf import FPDF
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -304,6 +305,23 @@ def export_document_pdf(content: str, title: str, logo_data: bytes | None = None
         normalized = unicodedata.normalize("NFKD", value)
         return normalized.encode("latin-1", errors="replace").decode("latin-1")
 
+    def draw_brand_mark(pdf, x: float, y: float, size: float):
+        pdf.set_fill_color(11, 31, 58)
+        pdf.rect(x, y, size, size, "F")
+        pdf.set_draw_color(212, 175, 55)
+        pdf.set_line_width(0.7)
+        pdf.line(x + size * 0.22, y + size * 0.72, x + size * 0.5, y + size * 0.22)
+        pdf.line(x + size * 0.5, y + size * 0.22, x + size * 0.78, y + size * 0.72)
+        pdf.line(x + size * 0.29, y + size * 0.5, x + size * 0.71, y + size * 0.5)
+        pdf.line(x + size * 0.5, y + size * 0.22, x + size * 0.5, y + size * 0.86)
+        pdf.set_fill_color(212, 175, 55)
+        pdf.ellipse(x + size * 0.2, y + size * 0.65, size * 0.14, size * 0.14, "F")
+        pdf.ellipse(x + size * 0.66, y + size * 0.65, size * 0.14, size * 0.14, "F")
+
+    def fit_image(image_width: int, image_height: int, max_width: float, max_height: float) -> tuple[float, float]:
+        scale = min(max_width / image_width, max_height / image_height)
+        return image_width * scale, image_height * scale
+
     logo_path = None
     if logo_data:
         with tempfile.NamedTemporaryFile(prefix="legalease-logo-", suffix=".png", delete=False) as logo_file:
@@ -316,23 +334,11 @@ def export_document_pdf(content: str, title: str, logo_data: bytes | None = None
             self.set_draw_color(11, 31, 58)
             if logo_path:
                 with Image.open(logo_path) as logo_image:
-                    aspect_ratio = logo_image.width / logo_image.height
-                logo_height = 14
-                logo_width = min(44, logo_height * aspect_ratio)
-                self.image(logo_path, x=20, y=10, w=logo_width, h=logo_height)
+                    logo_width, logo_height = fit_image(logo_image.width, logo_image.height, 44, 14)
+                self.image(logo_path, x=20, y=10 + (14 - logo_height) / 2, w=logo_width, h=logo_height)
                 text_x = 20 + logo_width + 4
             else:
-                self.set_text_color(255, 255, 255)
-                self.rect(20, 9, 14, 14, "F")
-                self.set_draw_color(212, 175, 55)
-                self.set_line_width(0.7)
-                self.line(23, 19, 27, 12)
-                self.line(27, 12, 31, 19)
-                self.line(24, 16, 30, 16)
-                self.line(27, 12, 27, 21)
-                self.set_fill_color(212, 175, 55)
-                self.ellipse(23, 18, 2, 2, "F")
-                self.ellipse(29, 18, 2, 2, "F")
+                draw_brand_mark(self, 20, 9, 14)
                 text_x = 38
             self.set_xy(text_x, 11)
             self.set_text_color(11, 31, 58)
@@ -355,6 +361,27 @@ def export_document_pdf(content: str, title: str, logo_data: bytes | None = None
     pdf.set_margins(20, 20, 20)
     try:
         pdf.add_page()
+        if logo_path:
+            with Image.open(logo_path) as logo_image:
+                body_logo_width, body_logo_height = fit_image(logo_image.width, logo_image.height, 65, 18)
+            pdf.image(
+                logo_path,
+                x=(210 - body_logo_width) / 2,
+                y=37 + (18 - body_logo_height) / 2,
+                w=body_logo_width,
+                h=body_logo_height,
+            )
+            pdf.set_y(59)
+        else:
+            brand_mark_size = 14
+            brand_group_width = 47
+            brand_group_x = (210 - brand_group_width) / 2
+            draw_brand_mark(pdf, brand_group_x, 38, brand_mark_size)
+            pdf.set_xy(brand_group_x + brand_mark_size + 4, 40)
+            pdf.set_font("Helvetica", "B", 13)
+            pdf.set_text_color(11, 31, 58)
+            pdf.cell(0, 8, "LegalEase")
+            pdf.set_y(59)
         pdf.set_font("Helvetica", "B", 18)
         pdf.multi_cell(0, 12, txt=pdf_safe_text(title), align="C")
         pdf.ln(6)
@@ -384,8 +411,19 @@ def export_document_pdf(content: str, title: str, logo_data: bytes | None = None
             Path(logo_path).unlink(missing_ok=True)
 
 
-def export_document_docx(content: str, title: str) -> bytes:
+def export_document_docx(content: str, title: str, logo_data: bytes | None = None) -> bytes:
     doc = DocxDocument()
+    header = doc.sections[0].header
+    header_paragraph = header.paragraphs[0]
+    header_paragraph.alignment = 1
+    if logo_data:
+        with Image.open(BytesIO(logo_data)) as logo_image:
+            aspect_ratio = logo_image.width / logo_image.height
+        logo_width = min(2.2, 0.7 * aspect_ratio)
+        header_paragraph.add_run().add_picture(BytesIO(logo_data), width=Inches(logo_width))
+    else:
+        run = header_paragraph.add_run("LegalEase")
+        run.bold = True
     doc.add_heading(title, level=1)
     for paragraph in content.splitlines():
         doc.add_paragraph(paragraph)
@@ -675,6 +713,8 @@ def delete_document(document_id: int, current_user: User = Depends(get_current_u
 @app.get("/api/documents/{document_id}/download")
 def download_document(document_id: int, format: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     document = find_user_document(document_id, current_user.id, db)
+    logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
+    logo_data = logo.image_data if logo else None
 
     safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", document.title).strip("._-") or "document"
     common_headers = {"Content-Disposition": f'attachment; filename="{safe_title}.{format.lower()}"', "X-Content-Type-Options": "nosniff"}
@@ -684,9 +724,8 @@ def download_document(document_id: int, format: str, current_user: User = Depend
         if not document.content or not document.content.strip():
             logger.warning("Refusing PDF export for document %s with empty saved content.", document.id)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty. Please save the document before downloading.")
-        logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
         try:
-            contents = export_document_pdf(document.content, document.title, logo.image_data if logo else None)
+            contents = export_document_pdf(document.content, document.title, logo_data)
         except ValueError as exc:
             logger.warning("PDF export rejected for document %s: %s", document.id, exc)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -697,7 +736,7 @@ def download_document(document_id: int, format: str, current_user: User = Depend
     if normalized_format == "docx":
         if not document.content or not document.content.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty. Please save the document before downloading.")
-        contents = export_document_docx(document.content, document.title)
+        contents = export_document_docx(document.content, document.title, logo_data)
         return Response(contents, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={**common_headers, "Content-Disposition": f'attachment; filename="{safe_title}.docx"'})
     if normalized_format == "txt":
         if not document.content or not document.content.strip():
