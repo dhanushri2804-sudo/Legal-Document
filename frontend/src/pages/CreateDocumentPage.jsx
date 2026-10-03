@@ -1,6 +1,6 @@
 import { FileText, LoaderCircle, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import api from '../api';
 
 const defaultForm = {
@@ -18,7 +18,6 @@ export default function CreateDocumentPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [form, setForm] = useState(defaultForm);
-  const [logoFile, setLogoFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -42,11 +41,7 @@ export default function CreateDocumentPage() {
     setError('');
 
     try {
-      const payload = {
-        ...form,
-        logo_filename: logoFile ? logoFile.name : null,
-      };
-      const response = await api.post('/documents/generate', payload);
+      const response = await api.post('/documents/generate', form);
       navigate(`/documents/${response.data.document.id}/edit`);
     } catch (err) {
       setError(err.response?.data?.detail || 'Unable to generate the document. Please try again.');
@@ -119,11 +114,9 @@ export default function CreateDocumentPage() {
               <textarea className="input-field min-h-[120px]" value={form.additional_instructions} onChange={(e) => handleChange('additional_instructions', e.target.value)} />
             </div>
 
-            <div className="md:col-span-2">
-              <label className="label-text">Logo upload</label>
-              <input type="file" className="input-field" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} accept="image/*" />
-            </div>
           </div>
+
+          <p className="mt-5 text-sm text-slate-600">PDFs use your saved organization logo automatically. <Link to="/profile" className="font-semibold text-navy underline">Manage logo in your profile</Link>.</p>
 
           <button type="submit" className="primary-button mt-8 w-full" disabled={loading}>
             {loading ? (
@@ -146,7 +139,7 @@ export default function CreateDocumentPage() {
             <p><span className="font-semibold text-slate-800">Effective:</span> {form.effective_date || 'Not specified'}</p>
             <p><span className="font-semibold text-slate-800">Parties:</span> {form.parties || 'Not yet specified'}</p>
             <p><span className="font-semibold text-slate-800">Company:</span> {form.company_name || 'Not specified'}</p>
-            <p><span className="font-semibold text-slate-800">Logo:</span> {logoFile ? logoFile.name : 'No file uploaded'}</p>
+            <p><span className="font-semibold text-slate-800">PDF branding:</span> Your saved organization logo or LegalEase mark</p>
           </div>
         </aside>
       </form>

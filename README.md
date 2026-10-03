@@ -161,6 +161,8 @@ Authenticated users can open the Legal Assistant to ask questions about saved dr
 
 The Template Library offers searchable starting points that populate the document form for customization. The editor stores a snapshot of the previous title and content whenever a change is saved and supports comparing or restoring snapshots. Signature requests are a manual status tracker only: LegalEase does not send email, collect signatures, or certify legally binding e-signatures. Reminders are stored per user and can be linked to a document; dates found in analyzer results can be added to the reminder list.
 
+Users can manage an organization logo from their profile. PNG, JPEG, and WebP uploads are validated, normalized, and stored in the user's SQLite record; PDFs use that logo in every page header, or a built-in LegalEase mark when no custom logo is saved.
+
 Automated summaries and reviews can miss context and are not legal advice. Have important agreements reviewed by a qualified lawyer, particularly for jurisdiction-specific requirements.
 
 ## Notes

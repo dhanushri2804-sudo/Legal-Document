@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import logging
 import re
+import tempfile
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Annotated
 
 import jwt
@@ -19,9 +21,10 @@ from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from docx import Document as DocxDocument
 from fpdf import FPDF
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .database import Base, SessionLocal, engine, get_db
-from .models import Document, DocumentVersion, Reminder, SignatureRequest, User
+from .models import Document, DocumentVersion, Reminder, SignatureRequest, User, UserLogo
 
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
@@ -293,7 +296,7 @@ def generate_document_text(document: DocumentRequest) -> str:
     return generate_fallback_document(document)
 
 
-def export_document_pdf(content: str, title: str) -> bytes:
+def export_document_pdf(content: str, title: str, logo_data: bytes | None = None) -> bytes:
     if not content or not content.strip():
         raise ValueError("Document content is empty.")
 
@@ -301,41 +304,84 @@ def export_document_pdf(content: str, title: str) -> bytes:
         normalized = unicodedata.normalize("NFKD", value)
         return normalized.encode("latin-1", errors="replace").decode("latin-1")
 
+    logo_path = None
+    if logo_data:
+        with tempfile.NamedTemporaryFile(prefix="legalease-logo-", suffix=".png", delete=False) as logo_file:
+            logo_file.write(logo_data)
+            logo_path = logo_file.name
+
     class LegalEasePDF(FPDF):
+        def header(self):
+            self.set_fill_color(11, 31, 58)
+            self.set_draw_color(11, 31, 58)
+            if logo_path:
+                with Image.open(logo_path) as logo_image:
+                    aspect_ratio = logo_image.width / logo_image.height
+                logo_height = 14
+                logo_width = min(44, logo_height * aspect_ratio)
+                self.image(logo_path, x=20, y=10, w=logo_width, h=logo_height)
+                text_x = 20 + logo_width + 4
+            else:
+                self.set_text_color(255, 255, 255)
+                self.rect(20, 9, 14, 14, "F")
+                self.set_draw_color(212, 175, 55)
+                self.set_line_width(0.7)
+                self.line(23, 19, 27, 12)
+                self.line(27, 12, 31, 19)
+                self.line(24, 16, 30, 16)
+                self.line(27, 12, 27, 21)
+                self.set_fill_color(212, 175, 55)
+                self.ellipse(23, 18, 2, 2, "F")
+                self.ellipse(29, 18, 2, 2, "F")
+                text_x = 38
+            self.set_xy(text_x, 11)
+            self.set_text_color(11, 31, 58)
+            self.set_font("Helvetica", "B", 14)
+            self.cell(0, 7, "LegalEase", ln=1)
+            self.set_draw_color(212, 175, 55)
+            self.set_line_width(0.6)
+            self.line(20, 29, 190, 29)
+            self.set_y(36)
+
         def footer(self):
             self.set_y(-12)
             self.set_font("Helvetica", "I", 8)
+            self.set_text_color(100, 116, 139)
             self.cell(0, 8, f"LegalEase | Page {self.page_no()}/{{nb}}", align="C")
 
     pdf = LegalEasePDF()
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_margins(20, 20, 20)
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.multi_cell(0, 12, txt=pdf_safe_text(title), align="C")
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "", 11)
-    for paragraph in content.splitlines():
-        clean_paragraph = pdf_safe_text(paragraph.strip())
-        if not clean_paragraph:
-            pdf.ln(4)
-            continue
-        is_heading = len(clean_paragraph) <= 100 and (
-            clean_paragraph.endswith(":") or clean_paragraph.isupper()
-        )
-        if is_heading:
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.multi_cell(0, 8, clean_paragraph)
-            pdf.set_font("Helvetica", "", 11)
-        else:
-            pdf.multi_cell(0, 7, clean_paragraph)
-            pdf.ln(2)
-    output = pdf.output(dest="S")
-    pdf_bytes = output.encode("latin-1") if isinstance(output, str) else bytes(output)
-    if not pdf_bytes.startswith(b"%PDF-"):
-        raise RuntimeError("PDF generator returned invalid data.")
-    return pdf_bytes
+    try:
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.multi_cell(0, 12, txt=pdf_safe_text(title), align="C")
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "", 11)
+        for paragraph in content.splitlines():
+            clean_paragraph = pdf_safe_text(paragraph.strip())
+            if not clean_paragraph:
+                pdf.ln(4)
+                continue
+            is_heading = len(clean_paragraph) <= 100 and (
+                clean_paragraph.endswith(":") or clean_paragraph.isupper()
+            )
+            if is_heading:
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.multi_cell(0, 8, clean_paragraph)
+                pdf.set_font("Helvetica", "", 11)
+            else:
+                pdf.multi_cell(0, 7, clean_paragraph)
+                pdf.ln(2)
+        output = pdf.output(dest="S")
+        pdf_bytes = output.encode("latin-1") if isinstance(output, str) else bytes(output)
+        if not pdf_bytes.startswith(b"%PDF-"):
+            raise RuntimeError("PDF generator returned invalid data.")
+        return pdf_bytes
+    finally:
+        if logo_path:
+            Path(logo_path).unlink(missing_ok=True)
 
 
 def export_document_docx(content: str, title: str) -> bytes:
@@ -468,6 +514,70 @@ def me(current_user: User = Depends(get_current_user)):
     return {"id": current_user.id, "name": current_user.name, "email": current_user.email}
 
 
+@app.get("/api/profile/logo")
+def get_profile_logo(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
+    if not logo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No organization logo has been uploaded.")
+    return Response(
+        logo.image_data,
+        media_type=logo.mime_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@app.post("/api/profile/logo")
+async def save_profile_logo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    image_bytes = await file.read(5 * 1024 * 1024 + 1)
+    if len(image_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Logo files must be 5 MB or smaller.")
+    if not image_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a valid PNG, JPEG, or WebP image.")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as uploaded_image:
+            if uploaded_image.format not in {"PNG", "JPEG", "WEBP"}:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a PNG, JPEG, or WebP image.")
+            if uploaded_image.width * uploaded_image.height > 40_000_000:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo image dimensions must be 40 megapixels or smaller.")
+            uploaded_image.verify()
+        with Image.open(BytesIO(image_bytes)) as uploaded_image:
+            logo_image = ImageOps.exif_transpose(uploaded_image).convert("RGBA")
+            logo_image.thumbnail((1600, 800), Image.Resampling.LANCZOS)
+            flattened = Image.new("RGB", logo_image.size, "white")
+            flattened.paste(logo_image, mask=logo_image.getchannel("A"))
+            sanitized_buffer = BytesIO()
+            flattened.save(sanitized_buffer, format="PNG", optimize=True)
+            sanitized_logo = sanitized_buffer.getvalue()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The logo file is invalid or could not be processed.") from exc
+
+    logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
+    if logo:
+        logo.image_data = sanitized_logo
+        logo.mime_type = "image/png"
+        logo.updated_at = datetime.now(timezone.utc)
+    else:
+        db.add(UserLogo(user_id=current_user.id, image_data=sanitized_logo, mime_type="image/png"))
+    db.commit()
+    return {"message": "Organization logo saved.", "mime_type": "image/png"}
+
+
+@app.delete("/api/profile/logo")
+def delete_profile_logo(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
+    if logo:
+        db.delete(logo)
+        db.commit()
+    return {"message": "Organization logo removed. PDFs will use the LegalEase logo."}
+
+
 @app.get("/api/dashboard")
 def dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     total_documents = db.query(func.count(Document.id)).filter(Document.user_id == current_user.id).scalar() or 0
@@ -574,8 +684,9 @@ def download_document(document_id: int, format: str, current_user: User = Depend
         if not document.content or not document.content.strip():
             logger.warning("Refusing PDF export for document %s with empty saved content.", document.id)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty. Please save the document before downloading.")
+        logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
         try:
-            contents = export_document_pdf(document.content, document.title)
+            contents = export_document_pdf(document.content, document.title, logo.image_data if logo else None)
         except ValueError as exc:
             logger.warning("PDF export rejected for document %s: %s", document.id, exc)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
