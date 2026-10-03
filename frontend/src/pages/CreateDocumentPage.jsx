@@ -14,6 +14,25 @@ const defaultForm = {
   company_name: '',
 };
 
+const getRequestErrorMessage = (error) => {
+  const detail = error.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((issue) => {
+        if (typeof issue === 'string') return issue;
+        if (!issue || typeof issue !== 'object' || typeof issue.msg !== 'string') return '';
+        const location = Array.isArray(issue.loc)
+          ? issue.loc.filter((part) => part !== 'body').join('.')
+          : '';
+        return location ? `${location}: ${issue.msg}` : issue.msg;
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+  return 'Unable to generate the document. Please try again.';
+};
+
 export default function CreateDocumentPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -41,10 +60,29 @@ export default function CreateDocumentPage() {
     setError('');
 
     try {
-      const response = await api.post('/documents/generate', form);
+      const requestForm = {
+        ...form,
+        title: form.title.trim(),
+        parties: form.parties.trim(),
+        terms: form.terms.trim(),
+      };
+      if (requestForm.title.length < 3) {
+        setError('Document title must be at least 3 characters.');
+        return;
+      }
+      if (requestForm.parties.length < 3) {
+        setError('Parties involved must be at least 3 characters.');
+        return;
+      }
+      if (requestForm.terms.length < 20) {
+        setError('Terms and conditions must be at least 20 characters.');
+        return;
+      }
+
+      const response = await api.post('/documents/generate', requestForm);
       navigate(`/documents/${response.data.document.id}/edit`);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Unable to generate the document. Please try again.');
+      setError(getRequestErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -69,7 +107,7 @@ export default function CreateDocumentPage() {
           <div className="grid gap-5 md:grid-cols-2">
             <div className="md:col-span-2">
               <label className="label-text">Document title</label>
-              <input className="input-field" value={form.title} onChange={(e) => handleChange('title', e.target.value)} required />
+              <input className="input-field" value={form.title} onChange={(e) => handleChange('title', e.target.value)} minLength={3} required />
             </div>
 
             <div>
@@ -91,12 +129,12 @@ export default function CreateDocumentPage() {
 
             <div className="md:col-span-2">
               <label className="label-text">Parties involved</label>
-              <textarea className="input-field min-h-[100px]" value={form.parties} onChange={(e) => handleChange('parties', e.target.value)} required />
+              <textarea className="input-field min-h-[100px]" value={form.parties} onChange={(e) => handleChange('parties', e.target.value)} minLength={3} required />
             </div>
 
             <div className="md:col-span-2">
               <label className="label-text">Terms and conditions</label>
-              <textarea className="input-field min-h-[180px]" value={form.terms} onChange={(e) => handleChange('terms', e.target.value)} required />
+              <textarea className="input-field min-h-[180px]" value={form.terms} onChange={(e) => handleChange('terms', e.target.value)} minLength={20} required />
             </div>
 
             <div>
