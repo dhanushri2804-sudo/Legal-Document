@@ -133,13 +133,13 @@ The app should be available at:
 The frontend uses:
 
 ```text
-http://localhost:8001/api
+http://localhost:8002/api
 ```
 
 If needed, update the Vite environment variable:
 
 ```env
-VITE_API_URL=http://localhost:8001/api
+VITE_API_URL=http://localhost:8002/api
 ```
 
 ## Authentication
