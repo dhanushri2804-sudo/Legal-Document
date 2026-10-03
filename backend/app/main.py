@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 from docx import Document as DocxDocument
 from docx.shared import Inches
 from fpdf import FPDF
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 
 from .database import Base, SessionLocal, engine, get_db
-from .models import Document, DocumentVersion, Reminder, SignatureRequest, User, UserLogo
+from .models import Document, DocumentVersion, Reminder, SignatureRequest, SystemAsset, User, UserLogo
 
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
@@ -436,6 +436,41 @@ def export_document_txt(content: str, title: str) -> str:
     return f"{title}\n\n{content}"
 
 
+def generate_default_logo_png() -> bytes:
+    scale = 3
+    image = Image.new("RGBA", (192 * scale, 192 * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    navy = (11, 31, 58, 255)
+    gold = (212, 175, 55, 255)
+    draw.rounded_rectangle((6 * scale, 6 * scale, 186 * scale, 186 * scale), radius=30 * scale, fill=navy)
+    draw.line((56 * scale, 126 * scale, 96 * scale, 50 * scale), fill=gold, width=7 * scale)
+    draw.line((96 * scale, 50 * scale, 136 * scale, 126 * scale), fill=gold, width=7 * scale)
+    draw.line((68 * scale, 88 * scale, 124 * scale, 88 * scale), fill=gold, width=6 * scale)
+    draw.line((96 * scale, 50 * scale, 96 * scale, 148 * scale), fill=gold, width=6 * scale)
+    draw.ellipse((49 * scale, 116 * scale, 67 * scale, 134 * scale), fill=gold)
+    draw.ellipse((125 * scale, 116 * scale, 143 * scale, 134 * scale), fill=gold)
+    image = image.resize((192, 192), Image.Resampling.LANCZOS)
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def get_or_create_default_logo(db: Session) -> bytes:
+    asset = db.query(SystemAsset).filter(SystemAsset.name == "legalease-default-logo").first()
+    if asset:
+        return asset.image_data
+    asset = SystemAsset(
+        name="legalease-default-logo",
+        image_data=generate_default_logo_png(),
+        mime_type="image/png",
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return asset.image_data
+
+
 def find_user_document(document_id: int, user_id: int, db: Session) -> Document:
     document = db.query(Document).filter(Document.id == document_id, Document.user_id == user_id).first()
     if not document:
@@ -515,6 +550,11 @@ def analyze_contract_text(text: str) -> dict:
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        get_or_create_default_logo(db)
+    finally:
+        db.close()
 
 
 @app.get("/api/health")
@@ -714,7 +754,7 @@ def delete_document(document_id: int, current_user: User = Depends(get_current_u
 def download_document(document_id: int, format: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     document = find_user_document(document_id, current_user.id, db)
     logo = db.query(UserLogo).filter(UserLogo.user_id == current_user.id).first()
-    logo_data = logo.image_data if logo else None
+    logo_data = logo.image_data if logo else get_or_create_default_logo(db)
 
     safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", document.title).strip("._-") or "document"
     common_headers = {"Content-Disposition": f'attachment; filename="{safe_title}.{format.lower()}"', "X-Content-Type-Options": "nosniff"}

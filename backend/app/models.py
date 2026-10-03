@@ -28,6 +28,15 @@ class UserLogo(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class SystemAsset(Base):
+    __tablename__ = "system_assets"
+
+    name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    image_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class Document(Base):
     __tablename__ = "documents"
 
