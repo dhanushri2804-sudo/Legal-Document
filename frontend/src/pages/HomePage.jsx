@@ -1,6 +1,5 @@
 import { ArrowRight, BadgeCheck, BookOpen, BriefcaseBusiness, CalendarClock, FileCheck2, FileSearch, FileSignature, FileText, GanttChart, History, MessageCircle, ShieldCheck, Sparkles } from 'lucide-react';
-import { useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export const featureCards = [
@@ -35,13 +34,6 @@ const documentTypes = [
 
 export default function HomePage() {
   const { isAuthenticated } = useAuth();
-  const location = useLocation();
-
-  useEffect(() => {
-    if (!location.hash) return;
-    const section = document.getElementById(location.hash.slice(1));
-    section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [location.hash]);
 
   return (
     <div>
