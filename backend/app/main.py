@@ -50,6 +50,7 @@ vercel_origin = "https://legal-document-6vsse00wl-123-136f.vercel.app"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[vercel_origin, *allowed_origins],
+    allow_origin_regex=r"^https://legal-document-[a-z0-9]+-123-136f\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
