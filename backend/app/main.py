@@ -46,6 +46,9 @@ allowed_origins = [
     ).split(",")
     if origin.strip()
 ]
+vercel_origin = "https://legal-document-6vsse00wl-123-136f.vercel.app"
+if vercel_origin not in allowed_origins:
+    allowed_origins.append(vercel_origin)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
