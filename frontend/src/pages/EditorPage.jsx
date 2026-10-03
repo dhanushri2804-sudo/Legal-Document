@@ -2,6 +2,7 @@ import { Download, FileText, History, LoaderCircle, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../api';
+import { downloadDocumentFile } from '../utils/downloadDocument';
 
 export default function EditorPage() {
   const { id } = useParams();
@@ -84,16 +85,12 @@ export default function EditorPage() {
 
   const downloadDocument = async (format) => {
     try {
-      const response = await api.get(`/documents/${id}/download?format=${format}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = window.document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${document.title || 'document'}.${format}`);
-      window.document.body.appendChild(link);
-      link.click();
-      link.remove();
+      if (hasChanges && !window.confirm('This downloads the latest saved version. Your unsaved edits will not be included. Continue?')) {
+        return;
+      }
+      await downloadDocumentFile(id, document.title, format);
     } catch (error) {
-      setStatus('Download failed. Please try again.');
+      setStatus(error.message || `Unable to generate ${format.toUpperCase()}. Please try again.`);
     }
   };
 

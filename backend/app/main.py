@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import logging
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Annotated
@@ -39,6 +40,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -292,15 +294,48 @@ def generate_document_text(document: DocumentRequest) -> str:
 
 
 def export_document_pdf(content: str, title: str) -> bytes:
-    pdf = FPDF()
+    if not content or not content.strip():
+        raise ValueError("Document content is empty.")
+
+    def pdf_safe_text(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", value)
+        return normalized.encode("latin-1", errors="replace").decode("latin-1")
+
+    class LegalEasePDF(FPDF):
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 8)
+            self.cell(0, 8, f"LegalEase | Page {self.page_no()}/{{nb}}", align="C")
+
+    pdf = LegalEasePDF()
+    pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(20, 20, 20)
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 12, txt=title, ln=1)
+    pdf.multi_cell(0, 12, txt=pdf_safe_text(title), align="C")
+    pdf.ln(6)
     pdf.set_font("Helvetica", "", 11)
-    for line in content.splitlines():
-        pdf.multi_cell(0, 10, txt=line)
-    return pdf.output(dest="S")
+    for paragraph in content.splitlines():
+        clean_paragraph = pdf_safe_text(paragraph.strip())
+        if not clean_paragraph:
+            pdf.ln(4)
+            continue
+        is_heading = len(clean_paragraph) <= 100 and (
+            clean_paragraph.endswith(":") or clean_paragraph.isupper()
+        )
+        if is_heading:
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.multi_cell(0, 8, clean_paragraph)
+            pdf.set_font("Helvetica", "", 11)
+        else:
+            pdf.multi_cell(0, 7, clean_paragraph)
+            pdf.ln(2)
+    output = pdf.output(dest="S")
+    pdf_bytes = output.encode("latin-1") if isinstance(output, str) else bytes(output)
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise RuntimeError("PDF generator returned invalid data.")
+    return pdf_bytes
 
 
 def export_document_docx(content: str, title: str) -> bytes:
@@ -529,20 +564,35 @@ def delete_document(document_id: int, current_user: User = Depends(get_current_u
 
 @app.get("/api/documents/{document_id}/download")
 def download_document(document_id: int, format: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    document = db.query(Document).filter(Document.id == document_id, Document.user_id == current_user.id).first()
-    if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    document = find_user_document(document_id, current_user.id, db)
+
+    safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", document.title).strip("._-") or "document"
+    common_headers = {"Content-Disposition": f'attachment; filename="{safe_title}.{format.lower()}"', "X-Content-Type-Options": "nosniff"}
 
     normalized_format = format.lower()
     if normalized_format == "pdf":
-        contents = export_document_pdf(document.content, document.title)
-        return Response(contents, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{document.title}.pdf"'})
+        if not document.content or not document.content.strip():
+            logger.warning("Refusing PDF export for document %s with empty saved content.", document.id)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty. Please save the document before downloading.")
+        try:
+            contents = export_document_pdf(document.content, document.title)
+        except ValueError as exc:
+            logger.warning("PDF export rejected for document %s: %s", document.id, exc)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("PDF generation failed for document %s.", document.id)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to generate PDF. Please try again.") from exc
+        return Response(contents, media_type="application/pdf", headers={**common_headers, "Content-Disposition": f'attachment; filename="{safe_title}.pdf"'})
     if normalized_format == "docx":
+        if not document.content or not document.content.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty. Please save the document before downloading.")
         contents = export_document_docx(document.content, document.title)
-        return Response(contents, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": f'attachment; filename="{document.title}.docx"'})
+        return Response(contents, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={**common_headers, "Content-Disposition": f'attachment; filename="{safe_title}.docx"'})
     if normalized_format == "txt":
+        if not document.content or not document.content.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document content is empty. Please save the document before downloading.")
         content = export_document_txt(document.content, document.title)
-        return Response(content.encode("utf-8"), media_type="text/plain", headers={"Content-Disposition": f'attachment; filename="{document.title}.txt"'})
+        return Response(content.encode("utf-8"), media_type="text/plain", headers={**common_headers, "Content-Disposition": f'attachment; filename="{safe_title}.txt"'})
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format. Use pdf, docx, or txt.")
 

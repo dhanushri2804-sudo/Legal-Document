@@ -2,12 +2,14 @@ import { ArrowLeft, Download, Edit3, FileText, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api';
+import { downloadDocumentFile } from '../utils/downloadDocument';
 
 export default function DocumentDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [document, setDocument] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [downloadError, setDownloadError] = useState('');
 
   useEffect(() => {
     const fetchDocument = async () => {
@@ -38,17 +40,11 @@ export default function DocumentDetailsPage() {
   };
 
   const downloadDocument = async (format) => {
+    setDownloadError('');
     try {
-      const response = await api.get(`/documents/${id}/download?format=${format}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = window.document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${document.title}.${format}`);
-      window.document.body.appendChild(link);
-      link.click();
-      link.remove();
+      await downloadDocumentFile(id, document.title, format);
     } catch (error) {
-      console.error(error);
+      setDownloadError(error.message || `Unable to generate ${format.toUpperCase()}. Please try again.`);
     }
   };
 
@@ -105,6 +101,7 @@ export default function DocumentDetailsPage() {
           <div className="mt-6 whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-700">{document.content}</div>
         </div>
       </div>
+      {downloadError && <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{downloadError}</div>}
     </div>
   );
 }
