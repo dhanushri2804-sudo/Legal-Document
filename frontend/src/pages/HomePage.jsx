@@ -56,16 +56,16 @@ export default function HomePage() {
           <p className="mt-6 max-w-xl text-lg text-slate-600">
             LegalEase helps you create, edit, and download professional legal draft documents with AI-powered guidance, secure storage, and clean formatting.
           </p>
-          <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link to={isAuthenticated ? '/documents/new' : '/register'} className="primary-button">
+          <div className="relative z-10 mt-8 flex flex-wrap items-center gap-4">
+            <Link to={isAuthenticated ? '/documents/new' : '/register'} className="primary-button relative z-10 cursor-pointer pointer-events-auto">
               Create Your Document
             </Link>
-            <a href="#features" className="secondary-button">Explore Features</a>
+            <Link to="/#features" className="secondary-button relative z-10 cursor-pointer pointer-events-auto">Explore Features</Link>
           </div>
         </div>
 
         <div className="relative">
-          <div className="grid-pattern absolute -left-8 top-8 h-64 w-64 rounded-full bg-gold/20 blur-3xl" />
+          <div className="grid-pattern pointer-events-none absolute -left-8 top-8 h-64 w-64 rounded-full bg-gold/20 blur-3xl" />
           <div className="soft-panel relative overflow-hidden p-6">
             <div className="flex items-center justify-between border-b border-slate-200 pb-4">
               <div>
