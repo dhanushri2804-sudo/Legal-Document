@@ -1,4 +1,4 @@
-import { ArrowRight, BadgeCheck, BriefcaseBusiness, FileCheck2, FileText, GanttChart, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowRight, BadgeCheck, BookOpen, BriefcaseBusiness, CalendarClock, FileCheck2, FileSearch, FileSignature, FileText, GanttChart, History, MessageCircle, ShieldCheck, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -9,6 +9,12 @@ const featureCards = [
   { icon: ShieldCheck, title: 'Secure Document Storage', description: 'Keep user-specific documents protected and organized in a personal workspace.' },
   { icon: GanttChart, title: 'Professional Formatting', description: 'Keep each draft consistent, readable, and presentation-ready for clients or teams.' },
   { icon: BriefcaseBusiness, title: 'Easy Document Management', description: 'See all your drafts, edit details, and track recent activity from one dashboard.' },
+  { icon: MessageCircle, title: 'AI Legal Assistant', description: 'Ask questions about saved drafts, understand legal terms, and get plain-English summaries.' },
+  { icon: FileSearch, title: 'AI Contract Analyzer', description: 'Review PDF and DOCX files for key clauses, missing details, and dates worth checking.' },
+  { icon: FileSignature, title: 'E-Signature Status Tracking', description: 'Keep recipient and signing status details together; connect a signing provider for legally binding e-signatures.' },
+  { icon: History, title: 'Document Version History', description: 'Compare saved drafts and restore an earlier version when you need to revisit changes.' },
+  { icon: BookOpen, title: 'Smart Template Library', description: 'Search reusable starting points by category and customize them for your situation.' },
+  { icon: CalendarClock, title: 'Important Date Reminders', description: 'Track renewal and expiry dates, and turn dates found during contract analysis into reminders.' },
 ];
 
 const steps = [

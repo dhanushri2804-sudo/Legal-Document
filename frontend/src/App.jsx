@@ -10,6 +10,10 @@ import EditorPage from './pages/EditorPage';
 import MyDocumentsPage from './pages/MyDocumentsPage';
 import DocumentDetailsPage from './pages/DocumentDetailsPage';
 import ProfilePage from './pages/ProfilePage';
+import AssistantPage from './pages/AssistantPage';
+import AnalyzerPage from './pages/AnalyzerPage';
+import TemplatesPage from './pages/TemplatesPage';
+import WorkflowPage from './pages/WorkflowPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { useAuth } from './context/AuthContext';
 
@@ -49,6 +53,10 @@ export default function App() {
         <Route path="/documents/:id/edit" element={<ProtectedRoute><EditorPage /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute><MyDocumentsPage /></ProtectedRoute>} />
         <Route path="/documents/:id" element={<ProtectedRoute><DocumentDetailsPage /></ProtectedRoute>} />
+        <Route path="/tools/assistant" element={<ProtectedRoute><AssistantPage /></ProtectedRoute>} />
+        <Route path="/tools/analyzer" element={<ProtectedRoute><AnalyzerPage /></ProtectedRoute>} />
+        <Route path="/templates" element={<ProtectedRoute><TemplatesPage /></ProtectedRoute>} />
+        <Route path="/workflows" element={<ProtectedRoute><WorkflowPage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

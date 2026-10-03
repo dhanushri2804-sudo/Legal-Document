@@ -1,4 +1,4 @@
-import { FileText, Plus, TrendingUp } from 'lucide-react';
+import { CalendarClock, FileSearch, FileText, MessageCircle, Plus, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
@@ -58,6 +58,19 @@ export default function DashboardPage() {
             <Link to="/documents" className="secondary-button w-full">View My Documents</Link>
           </div>
         </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { to: '/tools/assistant', label: 'Ask about a document', icon: MessageCircle },
+          { to: '/tools/analyzer', label: 'Analyze a contract', icon: FileSearch },
+          { to: '/templates', label: 'Browse templates', icon: FileText },
+          { to: '/workflows', label: 'Track dates & signatures', icon: CalendarClock },
+        ].map(({ to, label, icon: Icon }) => (
+          <Link key={to} to={to} className="soft-panel flex items-center gap-3 p-4 font-semibold text-navy transition hover:border-gold">
+            <Icon className="h-5 w-5 text-gold" />{label}
+          </Link>
+        ))}
       </div>
 
       <div className="mt-10 grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">

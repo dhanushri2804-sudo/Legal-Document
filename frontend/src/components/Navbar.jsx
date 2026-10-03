@@ -50,6 +50,10 @@ export default function Navbar() {
           {isAuthenticated ? (
             <>
               <Link to="/dashboard" className="secondary-button">Dashboard</Link>
+              <Link to="/tools/assistant" className="hidden text-sm font-semibold text-slate-700 hover:text-navy xl:inline">Assistant</Link>
+              <Link to="/tools/analyzer" className="hidden text-sm font-semibold text-slate-700 hover:text-navy xl:inline">Analyzer</Link>
+              <Link to="/templates" className="hidden text-sm font-semibold text-slate-700 hover:text-navy xl:inline">Templates</Link>
+              <Link to="/workflows" className="hidden text-sm font-semibold text-slate-700 hover:text-navy xl:inline">Workflows</Link>
               <Link to="/profile" className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
                 <UserCircle2 className="h-4 w-4" />
                 {user?.name || 'Profile'}
@@ -85,6 +89,10 @@ export default function Navbar() {
             {isAuthenticated ? (
               <>
                 <Link to="/dashboard" onClick={() => setMobileOpen(false)} className="secondary-button">Dashboard</Link>
+                <Link to="/tools/assistant" onClick={() => setMobileOpen(false)} className="secondary-button">Legal Assistant</Link>
+                <Link to="/tools/analyzer" onClick={() => setMobileOpen(false)} className="secondary-button">Contract Analyzer</Link>
+                <Link to="/templates" onClick={() => setMobileOpen(false)} className="secondary-button">Template Library</Link>
+                <Link to="/workflows" onClick={() => setMobileOpen(false)} className="secondary-button">Signatures & Reminders</Link>
                 <Link to="/profile" onClick={() => setMobileOpen(false)} className="secondary-button">Profile</Link>
                 <button onClick={handleLogout} className="primary-button">Logout</button>
               </>

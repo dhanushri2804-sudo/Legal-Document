@@ -26,6 +26,10 @@ export default function CreateDocumentPage() {
     if (location.state?.documentType) {
       setForm((current) => ({ ...current, document_type: location.state.documentType }));
     }
+    if (location.state?.template) {
+      const { title, type, terms } = location.state.template;
+      setForm((current) => ({ ...current, title, document_type: type, terms }));
+    }
   }, [location.state]);
 
   const handleChange = (key, value) => {

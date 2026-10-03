@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+import logging
+import re
+from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 from typing import Annotated
 
 import jwt
@@ -10,16 +13,17 @@ from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
-from pydantic import BaseModel, field_validator
-from sqlalchemy import func
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from docx import Document as DocxDocument
 from fpdf import FPDF
 
 from .database import Base, SessionLocal, engine, get_db
-from .models import Document, User
+from .models import Document, DocumentVersion, Reminder, SignatureRequest, User
 
 dotenv.load_dotenv()
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key")
 ALGORITHM = "HS256"
@@ -131,6 +135,48 @@ class UpdateDocumentRequest(BaseModel):
     additional_instructions: str | None = None
     company_name: str | None = None
     content: str | None = None
+
+
+class AssistantRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
+    document_id: int | None = None
+    document_text: str | None = Field(default=None, max_length=50000)
+
+
+class SignatureRequestCreate(BaseModel):
+    document_id: int
+    recipient_name: str = Field(min_length=2, max_length=100)
+    recipient_email: str = Field(min_length=5, max_length=255)
+
+    @field_validator("recipient_email")
+    @classmethod
+    def validate_recipient_email(cls, value):
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+            raise ValueError("A valid recipient email is required.")
+        return normalized
+
+
+class SignatureStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value):
+        if value not in {"pending", "signed", "declined", "cancelled"}:
+            raise ValueError("Status must be pending, signed, declined, or cancelled.")
+        return value
+
+
+class ReminderCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+    due_date: date
+    document_id: int | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class ReminderUpdate(BaseModel):
+    completed: bool
 
 
 class UserResponse(BaseModel):
@@ -271,6 +317,82 @@ def export_document_txt(content: str, title: str) -> str:
     return f"{title}\n\n{content}"
 
 
+def find_user_document(document_id: int, user_id: int, db: Session) -> Document:
+    document = db.query(Document).filter(Document.id == document_id, Document.user_id == user_id).first()
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    return document
+
+
+def ask_gemini(prompt: str) -> str | None:
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+        response = genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt)
+        return getattr(response, "text", None)
+    except Exception:
+        logger.exception("Gemini request failed.")
+        return None
+
+
+def analyze_contract_text(text: str) -> dict:
+    paragraphs = [part.strip() for part in re.split(r"\n+|(?<=[.!?])\s+", text) if part.strip()]
+    clause_terms = {
+        "Payment and compensation": ("payment", "compensation", "fee", "invoice", "salary"),
+        "Term and termination": ("termination", "terminate", "duration", "renewal", "expires"),
+        "Confidentiality": ("confidential", "non-disclosure", "proprietary"),
+        "Liability and indemnity": ("liability", "indemnif", "damages", "limitation of"),
+        "Dispute resolution": ("dispute", "arbitration", "mediation", "jurisdiction", "governing law"),
+        "Intellectual property": ("intellectual property", "ownership", "copyright", "work product"),
+    }
+    clauses = []
+    lower_text = text.lower()
+    for label, keywords in clause_terms.items():
+        matches = [part for part in paragraphs if any(keyword in part.lower() for keyword in keywords)]
+        if matches:
+            clauses.append({"name": label, "excerpt": matches[0][:500]})
+
+    missing_information = []
+    if not re.search(r"\b(parties|between)\b", lower_text):
+        missing_information.append("Confirm the full legal names and roles of all parties.")
+    if not re.search(r"\b(effective date|commencement|start date)\b", lower_text):
+        missing_information.append("Confirm the effective or commencement date.")
+    if not any(term in lower_text for term in ("governing law", "jurisdiction", "laws of")):
+        missing_information.append("Consider specifying governing law or jurisdiction.")
+    if not any(term in lower_text for term in ("termination", "terminate", "expiration")):
+        missing_information.append("Review whether the agreement needs a term and termination process.")
+
+    date_matches = set(re.findall(
+        r"\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4}|"
+        r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+\d{1,2},?\s+\d{4})\b",
+        text,
+        re.IGNORECASE,
+    ))
+    extracted_dates = []
+    for value in sorted(date_matches):
+        parsed = None
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%B %d %Y"):
+            try:
+                parsed = datetime.strptime(value, fmt).date()
+                break
+            except ValueError:
+                continue
+        if parsed:
+            extracted_dates.append({"date": parsed.isoformat(), "source_text": value})
+
+    return {
+        "summary": " ".join(paragraphs[:5])[:1200] or "No readable text was found in the document.",
+        "clauses": clauses,
+        "missing_information": missing_information,
+        "dates": extracted_dates,
+    }
+
+
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
@@ -371,11 +493,21 @@ def generate_document(request: DocumentRequest, current_user: User = Depends(get
 
 @app.put("/api/documents/{document_id}")
 def update_document(document_id: int, request: UpdateDocumentRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    document = db.query(Document).filter(Document.id == document_id, Document.user_id == current_user.id).first()
-    if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    document = find_user_document(document_id, current_user.id, db)
 
-    for field, value in request.model_dump(exclude_unset=True).items():
+    changes = request.model_dump(exclude_unset=True, exclude_none=True)
+    if any(getattr(document, field) != value for field, value in changes.items()):
+        previous_versions = db.query(func.max(DocumentVersion.version_number)).filter(
+            DocumentVersion.document_id == document.id
+        ).scalar() or 0
+        db.add(DocumentVersion(
+            document_id=document.id,
+            user_id=current_user.id,
+            version_number=previous_versions + 1,
+            title=document.title,
+            content=document.content,
+        ))
+    for field, value in changes.items():
         if value is not None:
             setattr(document, field, value)
     document.updated_at = datetime.now(timezone.utc)
@@ -386,9 +518,10 @@ def update_document(document_id: int, request: UpdateDocumentRequest, current_us
 
 @app.delete("/api/documents/{document_id}")
 def delete_document(document_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    document = db.query(Document).filter(Document.id == document_id, Document.user_id == current_user.id).first()
-    if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    document = find_user_document(document_id, current_user.id, db)
+    db.query(DocumentVersion).filter(DocumentVersion.document_id == document.id).delete()
+    db.query(SignatureRequest).filter(SignatureRequest.document_id == document.id).delete()
+    db.execute(update(Reminder).where(Reminder.document_id == document.id).values(document_id=None))
     db.delete(document)
     db.commit()
     return {"message": "Document deleted successfully."}
@@ -425,3 +558,202 @@ def upload_logo(document_id: int, file: UploadFile = File(...), current_user: Us
         db.commit()
         return {"message": "Logo uploaded successfully.", "filename": file.filename}
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A valid file is required.")
+
+
+@app.get("/api/documents/{document_id}/versions")
+def get_document_versions(document_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    find_user_document(document_id, current_user.id, db)
+    versions = db.query(DocumentVersion).filter(
+        DocumentVersion.document_id == document_id,
+        DocumentVersion.user_id == current_user.id,
+    ).order_by(DocumentVersion.version_number.desc()).all()
+    return [{
+        "id": version.id,
+        "version_number": version.version_number,
+        "title": version.title,
+        "content": version.content,
+        "created_at": version.created_at.isoformat(),
+    } for version in versions]
+
+
+@app.post("/api/documents/{document_id}/versions/{version_id}/restore")
+def restore_document_version(document_id: int, version_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    document = find_user_document(document_id, current_user.id, db)
+    version = db.query(DocumentVersion).filter(
+        DocumentVersion.id == version_id,
+        DocumentVersion.document_id == document_id,
+        DocumentVersion.user_id == current_user.id,
+    ).first()
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document version not found.")
+    latest_version = db.query(func.max(DocumentVersion.version_number)).filter(
+        DocumentVersion.document_id == document_id
+    ).scalar() or 0
+    db.add(DocumentVersion(
+        document_id=document.id,
+        user_id=current_user.id,
+        version_number=latest_version + 1,
+        title=document.title,
+        content=document.content,
+    ))
+    document.title = version.title
+    document.content = version.content
+    document.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"message": "Document version restored.", "document": safe_document(document)}
+
+
+@app.post("/api/assistant/ask")
+def ask_assistant(request: AssistantRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if request.document_id is not None:
+        document = find_user_document(request.document_id, current_user.id, db)
+        document_text = document.content
+        document_title = document.title
+    elif request.document_text and request.document_text.strip():
+        document_text = request.document_text.strip()
+        document_title = "Provided text"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a document or provide text to ask about.")
+
+    prompt = (
+        "Answer the user's question using only the document excerpt. Explain legal terminology in plain language. "
+        "Do not present this as legal advice; state when the document does not provide enough information.\n\n"
+        f"Document ({document_title}):\n{document_text[:30000]}\n\nQuestion: {request.question}"
+    )
+    answer = ask_gemini(prompt)
+    if answer:
+        return {"answer": answer, "mode": "ai"}
+
+    words = [word.lower() for word in re.findall(r"[A-Za-z0-9]{4,}", request.question)]
+    relevant = [line.strip() for line in re.split(r"[\n.!?]+", document_text) if line.strip() and any(word in line.lower() for word in words)]
+    if "summar" in request.question.lower():
+        answer = "Document overview (local excerpt): " + " ".join(document_text.split()[:120])
+    elif relevant:
+        answer = "Relevant text from the document: " + " ".join(relevant[:3])[:2000]
+    else:
+        answer = "I could not find a passage that clearly answers that question in the selected text. Try asking about a specific clause or term."
+    return {"answer": answer, "mode": "local", "notice": "Gemini is not configured; this is a limited text-based response, not legal advice."}
+
+
+@app.post("/api/analyzer/analyze")
+async def analyze_contract(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".pdf", ".docx")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload a PDF or DOCX file.")
+    contents = await file.read(10 * 1024 * 1024 + 1)
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Files must be 10 MB or smaller.")
+    try:
+        if filename.endswith(".pdf"):
+            from pypdf import PdfReader
+
+            text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(contents)).pages)
+        else:
+            doc = DocxDocument(BytesIO(contents))
+            text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+            for table in doc.tables:
+                text += "\n" + "\n".join(" | ".join(cell.text for cell in row.cells) for row in table.rows)
+    except Exception as exc:
+        logger.info("Could not parse uploaded contract %s.", filename, exc_info=exc)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The uploaded file could not be read. Check that it is a valid PDF or DOCX.") from exc
+    if not text.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No readable text was found. Scanned PDFs need OCR before analysis.")
+
+    analysis = analyze_contract_text(text[:50000])
+    ai_review = ask_gemini(
+        "Review this contract text for items that deserve human legal review. Return concise, clearly labeled "
+        "observations only; do not claim to determine enforceability or provide legal advice.\n\n" + text[:30000]
+    )
+    return {
+        **analysis,
+        "filename": file.filename,
+        "characters_analyzed": min(len(text), 50000),
+        "ai_review": ai_review,
+        "mode": "ai-assisted" if ai_review else "local",
+        "notice": "Automated review can miss context and is not legal advice. Ask a qualified lawyer to review important agreements.",
+    }
+
+
+@app.get("/api/signatures")
+def list_signature_requests(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    records = db.query(SignatureRequest).filter(SignatureRequest.user_id == current_user.id).order_by(SignatureRequest.created_at.desc()).all()
+    return [{
+        "id": item.id,
+        "document_id": item.document_id,
+        "document_title": item.document.title,
+        "recipient_name": item.recipient_name,
+        "recipient_email": item.recipient_email,
+        "status": item.status,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    } for item in records]
+
+
+@app.post("/api/signatures")
+def create_signature_request(request: SignatureRequestCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    find_user_document(request.document_id, current_user.id, db)
+    item = SignatureRequest(
+        document_id=request.document_id,
+        user_id=current_user.id,
+        recipient_name=request.recipient_name.strip(),
+        recipient_email=str(request.recipient_email).lower(),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": item.id, "document_id": item.document_id, "recipient_name": item.recipient_name, "recipient_email": item.recipient_email, "status": item.status}
+
+
+@app.patch("/api/signatures/{signature_id}")
+def update_signature_status(signature_id: int, request: SignatureStatusUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(SignatureRequest).filter(
+        SignatureRequest.id == signature_id,
+        SignatureRequest.user_id == current_user.id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signature request not found.")
+    item.status = request.status
+    item.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"id": item.id, "status": item.status, "updated_at": item.updated_at.isoformat()}
+
+
+@app.get("/api/reminders")
+def list_reminders(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    records = db.query(Reminder).filter(Reminder.user_id == current_user.id).order_by(Reminder.completed, Reminder.due_date).all()
+    return [{
+        "id": item.id,
+        "document_id": item.document_id,
+        "document_title": item.document.title if item.document_id else None,
+        "title": item.title,
+        "due_date": item.due_date.isoformat(),
+        "notes": item.notes,
+        "completed": item.completed,
+    } for item in records]
+
+
+@app.post("/api/reminders")
+def create_reminder(request: ReminderCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if request.document_id is not None:
+        find_user_document(request.document_id, current_user.id, db)
+    item = Reminder(
+        user_id=current_user.id,
+        document_id=request.document_id,
+        title=request.title.strip(),
+        due_date=request.due_date,
+        notes=request.notes,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": item.id, "document_id": item.document_id, "title": item.title, "due_date": item.due_date.isoformat(), "notes": item.notes, "completed": item.completed}
+
+
+@app.patch("/api/reminders/{reminder_id}")
+def update_reminder(reminder_id: int, request: ReminderUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(Reminder).filter(Reminder.id == reminder_id, Reminder.user_id == current_user.id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found.")
+    item.completed = request.completed
+    db.commit()
+    return {"id": item.id, "completed": item.completed}

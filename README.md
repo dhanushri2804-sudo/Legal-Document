@@ -11,6 +11,11 @@ LegalEase is a full-stack web application for generating, editing, storing, and 
 - Editable document workspace
 - PDF, DOCX, and TXT exports
 - Secure user-specific document storage
+- Document Q&A and plain-English explanations, with Gemini when configured
+- PDF/DOCX contract analysis, clause checks, and extracted date suggestions
+- Searchable, categorized document templates
+- Document version snapshots, comparison, and restore
+- Signature status tracking and important-date reminders
 - SQLite database for local development
 - React + Vite frontend and FastAPI backend
 
@@ -34,6 +39,7 @@ LegalEase is a full-stack web application for generating, editing, storing, and 
 - python-dotenv
 - google-generativeai
 - python-docx
+- pypdf
 - FPDF
 
 ## Project Structure
@@ -120,7 +126,7 @@ npm run dev
 The app should be available at:
 
 - Frontend: http://127.0.0.1:5173
-- Backend API: http://127.0.0.1:8001
+- Backend API: http://127.0.0.1:8002
 
 ## Default API Base URL
 
@@ -148,6 +154,14 @@ Users can create an account via `/register`, log in via `/login`, and access pro
 4. The generated content appears in the editor.
 5. Users can edit and save changes.
 6. Files can be exported as PDF, DOCX, or TXT.
+
+## Legal Workspace Tools
+
+Authenticated users can open the Legal Assistant to ask questions about saved drafts. When `GOOGLE_API_KEY` is configured, the assistant and contract analyzer use Gemini; without it, the assistant uses limited local text matching and the analyzer reports local checks. The analyzer accepts text-based PDF and DOCX files up to 10 MB, extracts common clause references and recognizable dates, and does not retain uploaded files. Scanned PDFs require OCR, which is not currently included.
+
+The Template Library offers searchable starting points that populate the document form for customization. The editor stores a snapshot of the previous title and content whenever a change is saved and supports comparing or restoring snapshots. Signature requests are a manual status tracker only: LegalEase does not send email, collect signatures, or certify legally binding e-signatures. Reminders are stored per user and can be linked to a document; dates found in analyzer results can be added to the reminder list.
+
+Automated summaries and reviews can miss context and are not legal advice. Have important agreements reviewed by a qualified lawyer, particularly for jurisdiction-specific requirements.
 
 ## Notes
 
